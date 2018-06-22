@@ -371,35 +371,42 @@ namespace Sitecore.Support.SessionProvider.MongoDB
       Assert.ArgumentNotNull(application, "application");
       Assert.ArgumentNotNull(id, "id");
       Assert.ArgumentNotNull(sessionState, "sessionState");
+      try
+      {
+        DateTime timestamp = DateTime.UtcNow;
+        DateTime expiration = timestamp.AddMinutes(sessionState.Timeout);
 
-      DateTime timestamp = DateTime.UtcNow;
-      DateTime expiration = timestamp.AddMinutes(sessionState.Timeout);
+        byte[] data = SessionStateSerializer.Serialize(sessionState, this.m_Compress);
 
-      byte[] data = SessionStateSerializer.Serialize(sessionState, this.m_Compress);
+        BsonDocument bsonId = this.BuildSessionIdentifier(application, id);
+        BsonInt32 bsonTimeout = new BsonInt32(sessionState.Timeout);
+        BsonDateTime bsonExpiration = new BsonDateTime(expiration);
+        BsonString bsonLockId = new BsonString(string.Empty);
+        BsonDateTime bsonLockTimestamp = new BsonDateTime(timestamp);
+        BsonInt32 bsonAction = new BsonInt32(flags);
+        BsonBinaryData bsonData = new BsonBinaryData(data);
 
-      BsonDocument bsonId = this.BuildSessionIdentifier(application, id);
-      BsonInt32 bsonTimeout = new BsonInt32(sessionState.Timeout);
-      BsonDateTime bsonExpiration = new BsonDateTime(expiration);
-      BsonString bsonLockId = new BsonString(string.Empty);
-      BsonDateTime bsonLockTimestamp = new BsonDateTime(timestamp);
-      BsonInt32 bsonAction = new BsonInt32(flags);
-      BsonBinaryData bsonData = new BsonBinaryData(data);
+        BsonDocument document = new BsonDocument(false);
 
-      BsonDocument document = new BsonDocument(false);
+        document.Add(FIELD_ID, bsonId);
+        document.Add(FIELD_TIMEOUT, bsonTimeout);
+        document.Add(FIELD_EXPIRATION, bsonExpiration);
+        document.Add(FIELD_LOCK_COOKIE, bsonLockId);
+        document.Add(FIELD_LOCK_TIMESTAMP, bsonLockTimestamp);
+        document.Add(FIELD_FLAGS, bsonAction);
+        document.Add(FIELD_DATA, bsonData);
 
-      document.Add(FIELD_ID, bsonId);
-      document.Add(FIELD_TIMEOUT, bsonTimeout);
-      document.Add(FIELD_EXPIRATION, bsonExpiration);
-      document.Add(FIELD_LOCK_COOKIE, bsonLockId);
-      document.Add(FIELD_LOCK_TIMESTAMP, bsonLockTimestamp);
-      document.Add(FIELD_FLAGS, bsonAction);
-      document.Add(FIELD_DATA, bsonData);
+        IMongoQuery query = Query.EQ(FIELD_ID, bsonId);
 
-      IMongoQuery query = Query.EQ(FIELD_ID, bsonId);
+        WriteConcernResult wcr = this.m_Writer.Update(query, Update.Replace(document), UpdateFlags.Upsert, WriteConcern.Acknowledged);
 
-      WriteConcernResult wcr = this.m_Writer.Update(query, Update.Replace(document), UpdateFlags.Upsert, WriteConcern.Acknowledged);
+        Debug.Assert(wcr != null && !wcr.HasLastErrorMessage, "Failed to insert the session state store item.");
+      }
+      catch (MongoDuplicateKeyException exception)
+      {
+        Log.Debug(string.Format("Attempting to insert a duplicate key into the Mongo Session Store. Entry skipped. {0}", exception.Message));
+      }
 
-      Debug.Assert(wcr != null && !wcr.HasLastErrorMessage, "Failed to insert the session state store item.");
     }
 
 
